@@ -181,6 +181,8 @@ const MAX_OFFERED_IMPORTS: usize = 4;
 /// Engine state: the document, history, clipboard and transport plumbing.
 pub struct Engine {
     doc: Arc<Session>,
+    document_identity: Arc<()>,
+    account_write_generation: u64,
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
     pub history_limit: usize,
@@ -225,6 +227,8 @@ impl Engine {
         Engine {
             saved: Arc::clone(&doc),
             doc,
+            document_identity: Arc::new(()),
+            account_write_generation: 0,
             undo: Vec::new(),
             redo: Vec::new(),
             history_limit: 200,
@@ -297,6 +301,7 @@ impl Engine {
 
     /// Replace the whole document (open / new); clears history.
     pub fn replace_session(&mut self, s: Session) {
+        self.document_identity = Arc::new(());
         self.transport = TransportStatus { position: s.edit.selection.start.max(0), ..TransportStatus::default() };
         self.transport_requests.clear();
         self.transport_requests.push(TransportRequest::ResetSession);

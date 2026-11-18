@@ -19,6 +19,62 @@ pub(super) struct BundleLimits {
 
 const BUNDLE_LIMITS: BundleLimits = BundleLimits { entries: 10_000, bytes: 1 << 30 };
 
+/// The exact SoundCraft session awaiting confirmation of an account write.
+pub struct PreparedAccountBundle {
+    document_identity: Arc<()>,
+    write_generation: u64,
+    previous_saved: Arc<Session>,
+    previous_path: Option<String>,
+    snapshot: Arc<Session>,
+    path: String,
+}
+
+impl Engine {
+    /// Capture a portable session and its audio for the account host to write.
+    pub fn prepare_account_bundle(&self, path: &str) -> Result<(PreparedAccountBundle, Vec<u8>)> {
+        let suffix = format!(".{BUNDLE_EXTENSION}");
+        let name = path.rsplit('/').next().unwrap_or_default();
+        if name.len() <= suffix.len()
+            || !name.to_ascii_lowercase().ends_with(&suffix)
+            || path.len() > 2048
+            || path.split('/').any(|part| matches!(part, "" | "." | ".."))
+            || path.chars().any(|ch| ch == '\\' || ch.is_control())
+        {
+            return Err(EngineError::Io(format!("Choose an account-relative {suffix} path.")));
+        }
+        let snapshot = self.session_arc();
+        let (bytes, _) = session_bundle(&snapshot)?;
+        Ok((
+            PreparedAccountBundle {
+                document_identity: self.document_identity.clone(),
+                write_generation: self.account_write_generation,
+                previous_saved: self.saved.clone(),
+                previous_path: self.path.clone(),
+                snapshot,
+                path: path.to_owned(),
+            },
+            bytes,
+        ))
+    }
+
+    /// A confirmed write binds the captured revision and leaves any later edits in the active session.
+    pub fn adopt_account_bundle(&mut self, saved: PreparedAccountBundle) -> Result<()> {
+        if !Arc::ptr_eq(&saved.document_identity, &self.document_identity)
+            || saved.write_generation != self.account_write_generation
+            || !Arc::ptr_eq(&saved.previous_saved, &self.saved)
+            || self.path != saved.previous_path
+        {
+            return Err(EngineError::Io("The account save no longer matches this SoundCraft session.".into()));
+        }
+        self.path = Some(saved.path);
+        self.saved = saved.snapshot;
+        self.account_write_generation = self.account_write_generation.wrapping_add(1);
+        self.revision = self.revision.wrapping_add(1);
+        self.dirty = !Arc::ptr_eq(&self.doc, &self.saved);
+        Ok(())
+    }
+}
+
 /// The session as a bundle: `<name>.scraft` plus every source's audio as 32-bit float WAV under
 /// `Audio Files/` (stored, not compressed: audio barely compresses). Returns the bytes and the
 /// session with its source paths pointing into the bundle.
@@ -101,6 +157,35 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
 #[cfg(test)]
 mod bundle_tests {
     use super::*;
+
+    #[test]
+    fn account_bundle_confirmation_preserves_later_edits_and_rejects_a_stale_receipt() {
+        let mut engine = crate::demo::demo_engine();
+        engine.session_mut().name = "Captured session".into();
+        let (capture, bytes) = engine.prepare_account_bundle("Projects/Session.scraftz").unwrap();
+        let (stale, _) = engine.prepare_account_bundle("Projects/Other.scraftz").unwrap();
+        assert!(engine.is_dirty());
+        assert!(engine.path.is_none());
+        engine.session_mut().name = "Newer edit".into();
+        engine.adopt_account_bundle(capture).unwrap();
+        assert_eq!(engine.path.as_deref(), Some("Projects/Session.scraftz"));
+        assert_eq!(engine.session().name, "Newer edit");
+        assert!(engine.is_dirty());
+        assert!(engine.adopt_account_bundle(stale).is_err());
+        let mut reopened = Engine::default();
+        assert!(open_session_bytes(&mut reopened, "Session.scraftz", &bytes).unwrap().is_empty());
+        assert_eq!(reopened.session().name, "Captured session");
+        let (current, _) = engine.prepare_account_bundle("Projects/Session.scraftz").unwrap();
+        engine.adopt_account_bundle(current).unwrap();
+        assert!(!engine.is_dirty());
+        let (confirmed, _) = engine.prepare_account_bundle("Projects/Session.scraftz").unwrap();
+        let (obsolete, _) = engine.prepare_account_bundle("Projects/Other.scraftz").unwrap();
+        engine.adopt_account_bundle(confirmed).unwrap();
+        assert!(engine.adopt_account_bundle(obsolete).is_err());
+        let (prior, _) = engine.prepare_account_bundle("Projects/Session.scraftz").unwrap();
+        engine.replace_session(Session::default());
+        assert!(engine.adopt_account_bundle(prior).is_err());
+    }
 
     #[test]
     fn a_session_too_large_to_parse_is_refused_from_bytes() {
