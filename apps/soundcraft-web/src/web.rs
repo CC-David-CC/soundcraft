@@ -1,5 +1,6 @@
 //! The browser shell: the eframe web runner around [`SoundApp`].
 
+use crate::account::{AccountHost, Parent};
 use soundcraft_engine::{Engine, io};
 use soundcraft_ui_egui::dialogs::Dialog;
 use soundcraft_ui_egui::sampler_window::SampleRead;
@@ -24,8 +25,23 @@ pub fn start() {
             log::error!("missing <canvas id=\"{CANVAS_ID}\">");
             return;
         };
+        let search = query();
+        let parent = if search.trim_start_matches('?').split('&').any(|pair| pair == "host=webos-account") {
+            match Parent::connect() {
+                Ok(parent) => Some(parent),
+                Err(error) => {
+                    if let Some(loading) = document.get_element_by_id(LOADING_ID) {
+                        loading.set_text_content(Some(&error));
+                    }
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let creator_parent = parent.clone();
         let mut options = eframe::WebOptions::default();
-        if query().contains("webgl")
+        if search.contains("webgl")
             && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
         {
             create.instance_descriptor.backends = eframe::wgpu::Backends::GL;
@@ -38,13 +54,23 @@ pub fn start() {
                     if let Some(rs) = &cc.wgpu_render_state {
                         log::info!("soundcraft-web: wgpu backend {:?}", rs.adapter.get_info().backend);
                     }
-                    let engine = if query().contains("empty") { Engine::default() } else { soundcraft_engine::demo::demo_engine() };
+                    let account =
+                        creator_parent.map(|parent| AccountHost::install(parent, cc.egui_ctx.clone())).transpose().map_err(std::io::Error::other)?;
+                    let engine =
+                        if account.is_some() || search.contains("empty") { Engine::default() } else { soundcraft_engine::demo::demo_engine() };
                     let player = soundcraft_playback::Player::new(Arc::new(engine.session().clone()));
-                    let app = SoundApp::new(engine, Some(player), Services::default());
-                    Ok(Box::new(WebShell { app, inbox: Rc::default(), samples: Rc::default() }))
+                    let services = Services { account_session: account.as_ref().map(AccountHost::session_service), ..Services::default() };
+                    let app = SoundApp::new(engine, Some(player), services);
+                    Ok(Box::new(WebShell { app, inbox: Rc::default(), samples: Rc::default(), account }))
                 }),
             )
             .await;
+        if let Some(parent) = &parent {
+            let failure = result.as_ref().err().map(|_| "SoundCraft's browser renderer failed to start.".into());
+            if let Err(error) = parent.ready(failure) {
+                log::error!("{error}");
+            }
+        }
         if let Some(el) = document.get_element_by_id(LOADING_ID) {
             match result {
                 Ok(()) => el.remove(),
@@ -113,6 +139,7 @@ struct WebShell {
     app: SoundApp,
     inbox: Inbox,
     samples: SampleInbox,
+    account: Option<AccountHost>,
 }
 
 impl WebShell {
@@ -169,6 +196,9 @@ impl WebShell {
         let at = e.session().edit.selection.start.max(0);
         let result = match purpose {
             // Asks first when the open session has changes: the bytes wait for the answer.
+            Purpose::Session if self.account.is_some() => {
+                Err(soundcraft_engine::EngineError::Io("Upload the project in Files, then open it from your account.".into()))
+            }
             Purpose::Session => return soundcraft_ui_egui::dialogs::open_session_bytes(&mut self.app, name, bytes),
             // Imports are edits: one undo step each, like the import commands.
             Purpose::Audio => {
@@ -192,6 +222,12 @@ impl WebShell {
 
 impl eframe::App for WebShell {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(host) = &mut self.account {
+            host.poll(&mut self.app);
+            if host.suspended() {
+                return;
+            }
+        }
         self.take_drops(ctx);
         self.take_path_prompt(ctx);
         let pending = std::mem::take(&mut *self.inbox.borrow_mut());
@@ -205,16 +241,28 @@ impl eframe::App for WebShell {
         self.app.logic(ctx);
         // A prompt opened during this frame becomes a picker on the next one.
         self.take_path_prompt(ctx);
+        if let Some(host) = &mut self.account
+            && let Err(error) = host.publish_state(&self.app)
+        {
+            self.app.ui.status = error;
+        }
     }
 
     /// Forward raw input to the shared app hook so scripted gestures and host-key protection behave like the desktop
     /// shell.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if self.account.as_ref().is_some_and(AccountHost::suspended) {
+            raw.events.clear();
+            raw.dropped_files.clear();
+            return;
+        }
         self.app.raw_input_hook(ctx, raw);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.app.ui(ui);
+        if !self.account.as_ref().is_some_and(AccountHost::suspended) {
+            self.app.ui(ui);
+        }
     }
 }
 

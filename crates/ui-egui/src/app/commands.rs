@@ -22,7 +22,7 @@ impl SoundApp {
                 "session.save_as" => AccountSessionRequest::SaveAs,
                 "session.revert" => AccountSessionRequest::Revert,
                 "session.close" | "app.quit" => AccountSessionRequest::Close,
-                _ => unreachable!("account commands share the session route"),
+                _ => return Err("Unknown account session command.".into()),
             };
             if matches!(action, AccountSessionRequest::Save | AccountSessionRequest::SaveAs) {
                 self.capture_plugin_states();

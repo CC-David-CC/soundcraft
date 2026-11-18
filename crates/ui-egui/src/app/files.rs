@@ -11,6 +11,30 @@ impl SoundApp {
         self.midi = midi_editor::MidiEditorState::default();
     }
 
+    /// Adopt a session supplied by the account host and reset native playback and editing state.
+    pub fn open_account_session(&mut self, path: Option<&str>, bytes: &[u8], recover: bool) -> Result<(), String> {
+        if crate::bounce::refuses_session_switch(self) {
+            return Err(self.ui.status.clone());
+        }
+        let warnings = if recover {
+            self.engine.restore_account_bundle(path, bytes)
+        } else {
+            self.engine.open_account_bundle(path.ok_or("Choose an account SoundCraft session.")?, bytes)
+        }
+        .map_err(|error| error.to_string())?;
+        self.document_replaced();
+        if !warnings.is_empty() {
+            self.ui.status = format!("{} media items are unavailable.", warnings.len());
+        }
+        Ok(())
+    }
+
+    pub fn pause_account_playback(&mut self) {
+        if self.engine.transport.playing {
+            self.stop_play();
+        }
+    }
+
     /// The session is modified, or a plugin editor gesture still holds a state the session hasn't
     /// taken (see `editor_states_due`): both read the plugins' states before autosaving.
     pub(crate) fn has_unsaved_changes(&self) -> bool {

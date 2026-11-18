@@ -18,6 +18,8 @@ pub(super) struct BundleLimits {
 }
 
 const BUNDLE_LIMITS: BundleLimits = BundleLimits { entries: 10_000, bytes: 1 << 30 };
+pub const ACCOUNT_BUNDLE_BYTES: u64 = 128 * 1024 * 1024;
+const ACCOUNT_BUNDLE_LIMITS: BundleLimits = BundleLimits { entries: BUNDLE_LIMITS.entries, bytes: ACCOUNT_BUNDLE_BYTES };
 
 /// The exact SoundCraft session awaiting confirmation of an account write.
 pub struct PreparedAccountBundle {
@@ -50,7 +52,10 @@ impl Engine {
         if !bytes.starts_with(b"PK\x03\x04") {
             return Err(EngineError::Io("The account file is not a portable SoundCraft bundle.".into()));
         }
-        let warnings = open_session_bytes(self, name, bytes)?;
+        if bytes.len() as u64 > ACCOUNT_BUNDLE_BYTES {
+            return Err(EngineError::Io("The account project exceeds the SoundCraft bundle limit.".into()));
+        }
+        let warnings = open_session_bytes_within(self, name, bytes, ACCOUNT_BUNDLE_LIMITS)?;
         self.path = Some(path.to_owned());
         Ok(warnings)
     }
@@ -68,7 +73,7 @@ impl Engine {
     pub fn prepare_account_bundle(&self, path: &str) -> Result<(PreparedAccountBundle, Vec<u8>)> {
         account_bundle_name(path)?;
         let snapshot = self.session_arc();
-        let (bytes, _) = session_bundle(&snapshot)?;
+        let bytes = self.capture_account_draft()?;
         Ok((
             PreparedAccountBundle {
                 document_identity: self.document_identity.clone(),
@@ -80,6 +85,19 @@ impl Engine {
             },
             bytes,
         ))
+    }
+
+    /// Serialize account recovery and Save through the same bounded portable format.
+    pub fn capture_account_draft(&self) -> Result<Vec<u8>> {
+        let session = self.session();
+        if !session.videos.is_empty() {
+            return Err(EngineError::Io("Account bundles do not support linked video.".into()));
+        }
+        let (bytes, _) = session_bundle_within(session, ACCOUNT_BUNDLE_LIMITS)?;
+        if bytes.len() as u64 > ACCOUNT_BUNDLE_BYTES {
+            return Err(EngineError::Io("The account project exceeds the SoundCraft bundle limit.".into()));
+        }
+        Ok(bytes)
     }
 
     /// A confirmed write binds the captured revision and leaves any later edits in the active session.
@@ -135,8 +153,12 @@ pub(super) fn save_session_bundle(e: &mut Engine, path: &str) -> Result<usize> {
 /// `.scraft`, whose audio is then reported missing. Returns the missing media, like
 /// [`open_session`].
 pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Vec<String>> {
+    open_session_bytes_within(e, name, bytes, BUNDLE_LIMITS)
+}
+
+fn open_session_bytes_within(e: &mut Engine, name: &str, bytes: &[u8], limits: BundleLimits) -> Result<Vec<String>> {
     let (text, mut files) = if bytes.starts_with(b"PK\x03\x04") {
-        read_bundle(bytes, BUNDLE_LIMITS)?
+        read_bundle(bytes, limits)?
     } else {
         (super::session_bytes_text(name, bytes)?, std::collections::HashMap::new())
     };
@@ -204,6 +226,11 @@ mod bundle_tests {
         assert!(reopened.open_account_bundle("Projects/Session.scraftz", &bytes).unwrap().is_empty());
         assert_eq!(reopened.path.as_deref(), Some("Projects/Session.scraftz"));
         assert_eq!(reopened.session().name, "Captured session");
+        let draft = engine.capture_account_draft().unwrap();
+        reopened.restore_account_bundle(None, &draft).unwrap();
+        assert_eq!(reopened.session().name, "Newer edit");
+        assert!(reopened.path.is_none());
+        assert!(reopened.is_dirty());
         for path in [Some("Projects/Session.scraftz"), None] {
             reopened.restore_account_bundle(path, &bytes).unwrap();
             assert_eq!(reopened.path.as_deref(), path);

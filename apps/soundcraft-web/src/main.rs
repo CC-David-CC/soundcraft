@@ -15,8 +15,11 @@
 //!   playback is heard.
 //!
 //! URL query flags: `?webgl` forces the WebGL2 backend instead of WebGPU; `?empty` starts with an
-//! empty session instead of the demo.
+//! empty session instead of the demo. `?host=webos-account` opens an account session from WebOS.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
+#[cfg(target_arch = "wasm32")]
+mod account;
 
 #[cfg(target_arch = "wasm32")]
 mod web;
