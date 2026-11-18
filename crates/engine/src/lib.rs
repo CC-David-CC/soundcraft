@@ -183,6 +183,7 @@ pub struct Engine {
     doc: Arc<Session>,
     document_identity: Arc<()>,
     account_write_generation: u64,
+    recovered_account_draft: bool,
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
     pub history_limit: usize,
@@ -229,6 +230,7 @@ impl Engine {
             doc,
             document_identity: Arc::new(()),
             account_write_generation: 0,
+            recovered_account_draft: false,
             undo: Vec::new(),
             redo: Vec::new(),
             history_limit: 200,
@@ -302,6 +304,7 @@ impl Engine {
     /// Replace the whole document (open / new); clears history.
     pub fn replace_session(&mut self, s: Session) {
         self.document_identity = Arc::new(());
+        self.recovered_account_draft = false;
         self.transport = TransportStatus { position: s.edit.selection.start.max(0), ..TransportStatus::default() };
         self.transport_requests.clear();
         self.transport_requests.push(TransportRequest::ResetSession);
@@ -317,6 +320,9 @@ impl Engine {
     /// Whether the document changed since it was opened or saved. Selecting, locating and zooming
     /// don't count, and undoing back to the saved state makes it clean again.
     pub fn is_dirty(&self) -> bool {
+        if self.recovered_account_draft {
+            return true;
+        }
         if !self.dirty {
             return false;
         }
@@ -329,6 +335,7 @@ impl Engine {
         dirty
     }
     pub fn mark_clean(&mut self) {
+        self.recovered_account_draft = false;
         self.dirty = false;
         self.saved = Arc::clone(&self.doc);
     }

@@ -29,19 +29,44 @@ pub struct PreparedAccountBundle {
     path: String,
 }
 
+fn account_bundle_name(path: &str) -> Result<&str> {
+    let suffix = format!(".{BUNDLE_EXTENSION}");
+    let name = path.rsplit('/').next().unwrap_or_default();
+    if name.len() <= suffix.len()
+        || !name.to_ascii_lowercase().ends_with(&suffix)
+        || path.len() > 2048
+        || path.split('/').any(|part| matches!(part, "" | "." | ".."))
+        || path.chars().any(|ch| ch == '\\' || ch.is_control())
+    {
+        return Err(EngineError::Io(format!("Choose an account-relative {suffix} path.")));
+    }
+    Ok(name)
+}
+
 impl Engine {
+    /// Open a portable bundle supplied by the account host and retain its canonical account path.
+    pub fn open_account_bundle(&mut self, path: &str, bytes: &[u8]) -> Result<Vec<String>> {
+        let name = account_bundle_name(path)?;
+        if !bytes.starts_with(b"PK\x03\x04") {
+            return Err(EngineError::Io("The account file is not a portable SoundCraft bundle.".into()));
+        }
+        let warnings = open_session_bytes(self, name, bytes)?;
+        self.path = Some(path.to_owned());
+        Ok(warnings)
+    }
+
+    /// Restore unsaved account work. The account host chooses a binding only if the base still matches.
+    pub fn restore_account_bundle(&mut self, path: Option<&str>, bytes: &[u8]) -> Result<Vec<String>> {
+        let untitled = format!("Untitled.{BUNDLE_EXTENSION}");
+        let warnings = self.open_account_bundle(path.unwrap_or(&untitled), bytes)?;
+        self.path = path.map(str::to_owned);
+        self.recovered_account_draft = true;
+        Ok(warnings)
+    }
+
     /// Capture a portable session and its audio for the account host to write.
     pub fn prepare_account_bundle(&self, path: &str) -> Result<(PreparedAccountBundle, Vec<u8>)> {
-        let suffix = format!(".{BUNDLE_EXTENSION}");
-        let name = path.rsplit('/').next().unwrap_or_default();
-        if name.len() <= suffix.len()
-            || !name.to_ascii_lowercase().ends_with(&suffix)
-            || path.len() > 2048
-            || path.split('/').any(|part| matches!(part, "" | "." | ".."))
-            || path.chars().any(|ch| ch == '\\' || ch.is_control())
-        {
-            return Err(EngineError::Io(format!("Choose an account-relative {suffix} path.")));
-        }
+        account_bundle_name(path)?;
         let snapshot = self.session_arc();
         let (bytes, _) = session_bundle(&snapshot)?;
         Ok((
@@ -69,6 +94,7 @@ impl Engine {
         self.path = Some(saved.path);
         self.saved = saved.snapshot;
         self.account_write_generation = self.account_write_generation.wrapping_add(1);
+        self.recovered_account_draft = false;
         self.revision = self.revision.wrapping_add(1);
         self.dirty = !Arc::ptr_eq(&self.doc, &self.saved);
         Ok(())
@@ -173,8 +199,16 @@ mod bundle_tests {
         assert!(engine.is_dirty());
         assert!(engine.adopt_account_bundle(stale).is_err());
         let mut reopened = Engine::default();
-        assert!(open_session_bytes(&mut reopened, "Session.scraftz", &bytes).unwrap().is_empty());
+        assert!(reopened.open_account_bundle("../Session.scraftz", &bytes).is_err());
+        assert!(reopened.open_account_bundle("Projects/Session.scraftz", b"{}").is_err());
+        assert!(reopened.open_account_bundle("Projects/Session.scraftz", &bytes).unwrap().is_empty());
+        assert_eq!(reopened.path.as_deref(), Some("Projects/Session.scraftz"));
         assert_eq!(reopened.session().name, "Captured session");
+        for path in [Some("Projects/Session.scraftz"), None] {
+            reopened.restore_account_bundle(path, &bytes).unwrap();
+            assert_eq!(reopened.path.as_deref(), path);
+            assert!(reopened.is_dirty());
+        }
         let (current, _) = engine.prepare_account_bundle("Projects/Session.scraftz").unwrap();
         engine.adopt_account_bundle(current).unwrap();
         assert!(!engine.is_dirty());
