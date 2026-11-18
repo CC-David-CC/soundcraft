@@ -544,6 +544,10 @@ pub fn live_label(app: &SoundApp, id: Option<&str>) -> Option<String> {
 
 /// Menu-style invocation: may open a dialog.
 pub fn invoke_menu(app: &mut SoundApp, id: &str, path: &str) {
+    if id != "session.new" && app.routes_account_session(id) {
+        let _ = app.run(id, json!({}));
+        return;
+    }
     if id == "setup.preferences" {
         let _ = app.run(id, json!({"value": true}));
         return;
@@ -578,6 +582,10 @@ pub fn invoke_menu(app: &mut SoundApp, id: &str, path: &str) {
 /// Keyboard shortcut for a dialog command, or one that would close a modified session: open its
 /// dialog. Returns true when handled.
 pub fn invoke_shortcut_dialog(app: &mut SoundApp, id: &str) -> bool {
+    if id != "session.new" && app.routes_account_session(id) {
+        let _ = app.run(id, json!({}));
+        return true;
+    }
     (wants_dialog(id) && app.dialogs.open_for_command(&app.engine, id)) || crate::dialogs::ask_to_save(app, id, &json!({}))
 }
 

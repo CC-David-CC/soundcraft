@@ -173,6 +173,7 @@ fn services() -> Services {
             d.save_file()
         })),
         pick_folder: Some(Box::new(|start: &std::path::Path| rfd::FileDialog::new().set_directory(start).pick_folder())),
+        ..Services::default()
     }
 }
 
