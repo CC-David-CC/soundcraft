@@ -9,6 +9,7 @@ impl SoundApp {
 
     /// Run a command; errors go to the status line. Returns the result.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        let _language = crate::localization::enter(self.ui.language);
         let account_session = self.routes_account_session(id);
         let replaces_session = matches!(id, "session.new" | "session.open" | "session.close" | "session.revert");
         if (replaces_session || (account_session && id == "app.quit")) && bounce::refuses_session_switch(self) {
@@ -67,7 +68,7 @@ impl SoundApp {
                 Ok(v)
             }
             Err(e) => {
-                self.ui.status = e.to_string();
+                self.ui.status = crate::localization::error_text(&e.to_string());
                 log::warn!("{id}: {e}");
                 Err(e.to_string())
             }
