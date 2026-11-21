@@ -186,6 +186,7 @@ impl SoundApp {
     /// Arm the input for the record-enabled tracks; a session never saved records into its
     /// autosave folder. Returns the takes it records.
     fn arm_recorder(&mut self) -> Result<Vec<soundcraft_engine::io::Take>, String> {
+        let Some(r) = &mut self.recorder else { return Err(crate::localization::text("no audio input device").into()) };
         let name = soundcraft_engine::io::sanitize_name(&self.engine.session().name);
         // Without a settings folder the takes go under the temporary folder, in a folder of this
         // run's own that nobody else could have made first.
@@ -193,9 +194,8 @@ impl SoundApp {
             Some(d) => d.join(name),
             // A saved session records beside its file: `plan_takes` never uses this folder.
             None if self.engine.path.is_some() => std::path::PathBuf::new(),
-            None => self.fallback_take_dir()?,
+            None => Self::fallback_take_dir(&mut self.fallback_take_dir)?,
         };
-        let Some(r) = &mut self.recorder else { return Err(crate::localization::text("no audio input device").into()) };
         let plan = soundcraft_engine::io::plan_takes(&self.engine, &unsaved_dir, r.channels);
         if plan.is_empty() {
             return Err(crate::localization::text("no audio track is record-enabled").into());
@@ -224,13 +224,13 @@ impl SoundApp {
     /// The folder for the takes of a session never saved when there is no autosave folder, made on
     /// first use: exclusively and under a name nobody can guess, so another account cannot have
     /// made it first, with open permissions or as a link.
-    fn fallback_take_dir(&mut self) -> Result<std::path::PathBuf, String> {
-        if let Some(dir) = &self.fallback_take_dir {
+    fn fallback_take_dir(cached: &mut Option<std::path::PathBuf>) -> Result<std::path::PathBuf, String> {
+        if let Some(dir) = cached {
             return Ok(dir.clone());
         }
         let dir = soundcraft_engine::autosave::create_unique_folder(&std::env::temp_dir(), "SoundCraft")
             .map_err(|e| format!("temporary take folder: {e}"))?;
-        self.fallback_take_dir = Some(dir.clone());
+        *cached = Some(dir.clone());
         Ok(dir)
     }
 
@@ -554,12 +554,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_fallback_take_folder_is_made_once_under_the_temporary_folder() {
+    fn recording_without_an_input_leaves_the_take_folder_unallocated() {
         let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, crate::Services::default());
-        let a = app.fallback_take_dir().unwrap();
+        assert!(app.arm_recorder().is_err());
+        assert!(app.fallback_take_dir.is_none());
+    }
+
+    #[test]
+    fn the_fallback_take_folder_is_made_once_under_the_temporary_folder() {
+        let mut cached = None;
+        let a = SoundApp::fallback_take_dir(&mut cached).unwrap();
         assert_eq!(a.parent(), Some(std::env::temp_dir().as_path()));
         assert!(a.is_dir());
-        assert_eq!(app.fallback_take_dir().unwrap(), a, "the same folder for the rest of the run");
+        assert_eq!(SoundApp::fallback_take_dir(&mut cached).unwrap(), a, "the same folder for the rest of the run");
         let _ = std::fs::remove_dir_all(&a);
     }
 }
