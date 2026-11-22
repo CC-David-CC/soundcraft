@@ -55,6 +55,10 @@ impl SoundApp {
             p.set_speed(1.0);
             p.stop();
         }
+        if self.microphone_busy() && !self.engine.transport.recording && self.microphone_placement.is_none() {
+            if let Some(mic) = &mut self.services.microphone { mic.cancel(); }
+            self.microphone_routes = None;
+        }
         if self.engine.transport.recording {
             self.finish_recording();
         }
@@ -91,7 +95,33 @@ impl SoundApp {
         self.edit_layout.follow_hold = false;
     }
 
+    pub fn microphone_busy(&self) -> bool { self.microphone_routes.is_some() }
+    pub(super) fn poll_microphone(&mut self) {
+        let Some(event) = self.services.microphone.as_mut().and_then(|mic| mic.poll()) else { return };
+        match event {
+            crate::CaptureEvent::Started => self.begin_recording(Vec::new()),
+            crate::CaptureEvent::Failed(error) => {
+                self.microphone_routes = None;
+                self.ui.status = crate::localized_format!("Cannot record: {err}", err = error);
+            },
+            crate::CaptureEvent::Finished(buffer, warning) => {
+                if self.engine.transport.recording { self.stop_play(); }
+                let routes = self.microphone_routes.take().unwrap_or_default();
+                if let Some(plan) = self.microphone_placement.take() {
+                    let ids = soundcraft_engine::io::place_input_recording(&mut self.engine, &plan, routes, &buffer);
+                    self.ui.status = if ids.is_empty() {
+                        crate::localization::text("Nothing was recorded: the record-enabled tracks received no input").into()
+                    } else {
+                        crate::localized_format!("Recorded {} clip(s)", ids.len())
+                    };
+                }
+                if !warning.is_empty() { self.ui.status.push_str(&format!(" ({warning})")); }
+            }
+        }
+    }
+
     fn start_recording(&mut self) {
+        if self.microphone_busy() { return; }
         let armed = self.engine.session().tracks.iter().any(|t| t.mixer.record_arm);
         if !armed {
             let why = if self.engine.session().tracks.is_empty() {
@@ -116,6 +146,20 @@ impl SoundApp {
             .into();
             return;
         }
+        if audio_tracks && let Some(mic) = &mut self.services.microphone {
+            let routes = soundcraft_engine::io::input_takes(&self.engine, 2);
+            let width = routes.iter().map(|route| route.inputs.len()).sum::<usize>();
+            if width == 0 {
+                self.ui.status = crate::localization::text("no audio track is record-enabled").into();
+                return;
+            }
+            let rate = self.engine.session().sample_rate.hz();
+            let budget = soundcraft_engine::io::ACCOUNT_BUNDLE_BYTES / 4;
+            mic.prepare(rate, (budget / width.max(2) as u64) as u32);
+            self.microphone_routes = Some(routes);
+            self.ui.status = crate::localization::text("Opening microphone…").into();
+            return;
+        }
         if audio_tracks {
             self.ensure_input();
         }
@@ -137,6 +181,10 @@ impl SoundApp {
                 crate::localization::text("Cannot record: no MIDI input device is connected (Setup > Playback Engine lists them)").into();
             return;
         };
+        self.begin_recording(takes);
+    }
+
+    fn begin_recording(&mut self, takes: Vec<soundcraft_engine::io::Take>) {
         self.lost_shown = 0;
         self.begin_midi_take();
         if let Some(p) = &self.player {
@@ -261,6 +309,10 @@ impl SoundApp {
             rate: 0,
             takes: Vec::new(),
         });
+        if self.microphone_busy() {
+            self.microphone_placement = Some(plan.clone());
+            if let Some(mic) = &mut self.services.microphone { mic.stop(); }
+        }
         self.punch = None;
         self.autosaved_rev = 0;
         let ids = soundcraft_engine::io::place_recording(&mut self.engine, &plan, takes);
@@ -423,6 +475,9 @@ impl SoundApp {
                     // The old capture belongs to the replaced document, never to the new one.
                     self.recorder = None;
                     self.recorder_failed = false;
+                    if let Some(mic) = &mut self.services.microphone { mic.cancel(); }
+                    self.microphone_routes = None;
+                    self.microphone_placement = None;
                     self.punch = None;
                     self.gesture = None;
                     self.touched.clear();

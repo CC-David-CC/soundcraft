@@ -28,7 +28,7 @@ pub use midi::{export_midi, import_midi_bytes};
 pub use midi_take::{
     MAX_MIDI_TAKE_EVENTS, MidiPass, MidiTake, MidiTakeEvent, add_midi_recording, add_midi_recording_from, midi_record_inputs, records_midi,
 };
-pub use record::{Recording, Take, add_recording, live_span, place_recording, take_file_samples, take_part};
+pub use record::{Recording, Take, add_recording, live_span, place_input_recording, place_recording, take_file_samples, take_part};
 pub use render::{commit_track, consolidate, refuse_longer, render_clip_gain, render_limit, sanitize_name};
 pub(crate) use session::{DecodedFiles, decode_file, open_session_linked};
 pub use session::{open_session, save_copy, save_session, save_session_copy};
@@ -1101,8 +1101,24 @@ fn read_bundle(bytes: &[u8], limits: BundleLimits) -> Result<(String, std::colle
 /// `<track>_<NN>.wav` in the `Audio Files` of the session's folder (`unsaved_dir` until it is saved).
 pub fn plan_takes(e: &Engine, unsaved_dir: &Path, input_channels: usize) -> Vec<(TrackId, Vec<usize>, PathBuf)> {
     let dir = e.path.as_deref().and_then(|p| Path::new(p).parent()).unwrap_or(unsaved_dir);
+    let take_no = e.session().sources.len() + 1;
+    input_takes(e, input_channels).into_iter().map(|route| {
+let file = |n: usize| dir.join("Audio Files").join(format!("{}_{n:02}.wav", sanitize_name(&route.name)));
+            let path = (take_no..take_no + 1_000).map(file).find(|p| !p.exists()).unwrap_or_else(|| file(take_no));
+            (route.track, route.inputs, path)
+        })
+        .collect()
+}
+
+pub struct InputTake {
+    pub track: TrackId,
+    pub name: String,
+    pub inputs: Vec<usize>,
+}
+
+/// Freeze input routes when Record is requested, including while permission is pending.
+pub fn input_takes(e: &Engine, input_channels: usize) -> Vec<InputTake> {
     let s = e.session();
-    let take_no = s.sources.len() + 1;
     s.tracks
         .iter()
         .filter(|t| t.mixer.record_arm && t.kind == TrackKind::Audio && !t.inactive)
@@ -1114,11 +1130,9 @@ pub fn plan_takes(e: &Engine, unsaved_dir: &Path, input_channels: usize) -> Vec<
                 _ => 0,
             };
             let inputs = (0..t.channels()).map(|k| first.saturating_add(k) % input_channels.max(1)).collect();
-            let file = |n: usize| dir.join("Audio Files").join(format!("{}_{n:02}.wav", sanitize_name(&t.name)));
-            let path = (take_no..take_no + 1_000).map(file).find(|p| !p.exists()).unwrap_or_else(|| file(take_no));
-            (t.id, inputs, path)
-        })
-        .collect()
+            InputTake { track: t.id, inputs, name: t.name.clone() }
+        }).collect()
+
 }
 
 /// Checks that `path` is a file directly inside the media folder `media_dir` once both are

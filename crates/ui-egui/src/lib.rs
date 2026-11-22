@@ -65,7 +65,7 @@ mod state;
 
 #[cfg(test)]
 use app::{automation_step_due, editor_changes, editor_states_due, failed_plugin_status};
-pub use services::{AccountSessionFn, AccountSessionRequest, Services};
+pub use services::{AccountSessionFn, AccountSessionRequest, CaptureEvent, Microphone, Services};
 pub use state::{DragSource, MainWindow};
 
 /// UI state (serde, so agents can read and set it).
@@ -288,6 +288,8 @@ pub struct SoundApp {
     pub player: Option<Player>,
     /// Input capture, opened on first record.
     pub recorder: Option<soundcraft_playback::record::Recorder>,
+    microphone_routes: Option<Vec<soundcraft_engine::io::InputTake>>,
+    microphone_placement: Option<soundcraft_engine::io::Recording>,
     record_start: Samples,
     /// Punch range to trim the take to (pre/post-roll recordings).
     punch: Option<Range>,

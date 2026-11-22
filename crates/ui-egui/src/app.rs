@@ -38,6 +38,8 @@ impl SoundApp {
             engine,
             player,
             recorder: None,
+            microphone_routes: None,
+            microphone_placement: None,
             record_start: 0,
             punch: None,
             recorder_failed: false,
@@ -206,6 +208,10 @@ impl SoundApp {
         self.watch_input();
         // Stop the old playback before sending a replacement session to the audio thread.
         self.handle_transport(dt);
+        if self.microphone_busy() {
+            self.poll_microphone();
+            ctx.request_repaint_after_secs(0.03);
+        }
         if self.engine.revision != self.last_rev {
             self.last_rev = self.engine.revision;
             if let Some(p) = &self.player {

@@ -22,6 +22,9 @@
 mod account;
 
 #[cfg(target_arch = "wasm32")]
+mod microphone;
+
+#[cfg(target_arch = "wasm32")]
 mod web;
 
 #[cfg(target_arch = "wasm32")]

@@ -109,9 +109,27 @@ fn add_recording_in(
     out
 }
 
+/// Place microphone PCM using the same punch, loop, playlist, and undo behavior as file-backed takes.
+pub fn place_input_recording(e: &mut Engine, plan: &Recording, routes: Vec<super::InputTake>, input: &AudioBuffer) -> Vec<soundcraft_model::ClipId> {
+    if input.frames() == 0 || input.channels.is_empty() || input.sample_rate != e.session().sample_rate.hz() {
+        return Vec::new();
+    }
+    let before = e.session_arc();
+    let mut clips = Vec::new();
+    for route in routes {
+        let channels = route.inputs.iter().map(|i| input.channels[i % input.channels.len()].clone()).collect();
+        let path = PathBuf::from(format!("{}_{}.wav", super::sanitize_name(&route.name), e.session().sources.len() + 1));
+        let file = TakeFile { embedded: true, path, len: input.frames() as i64, resampled: false, audio: Some(AudioBuffer { channels, sample_rate: input.sample_rate }) };
+        clips.extend(place_take(e.session_mut(), route.track, vec![file], plan.start, plan.pass, plan.punch).0);
+    }
+    if !clips.is_empty() { e.push_undo("Record", before); }
+    clips
+}
+
 /// One file of a take: its length at the session's rate (`hz`), whether it is recorded at
 /// another rate, and its audio at the session's rate once read.
 struct TakeFile {
+    embedded: bool,
     path: PathBuf,
     len: Samples,
     resampled: bool,
@@ -134,7 +152,7 @@ fn decode_take(path: &Path, hz: u32) -> Result<(AudioBuffer, bool), EngineError>
 fn read_take_file(path: &Path, hz: u32) -> Result<TakeFile, EngineError> {
     let (buf, resampled) = decode_take(path, hz)?;
     let len = i64::try_from(buf.frames()).unwrap_or(0);
-    Ok(TakeFile { path: path.to_path_buf(), len, resampled, audio: Some(buf) })
+    Ok(TakeFile { embedded: false, path: path.to_path_buf(), len, resampled, audio: Some(buf) })
 }
 
 /// A take file's length at the session's rate `hz`, parsed from its header, without decoding it.
@@ -144,7 +162,7 @@ fn measure_take_file(path: &Path, hz: u32) -> Result<TakeFile, EngineError> {
     let resampled = info.sample_rate != hz && info.sample_rate > 0;
     let frames = usize::try_from(info.frames).unwrap_or(usize::MAX);
     let len = if resampled { soundcraft_dsp::offline::resampled_len(frames, info.sample_rate, hz) } else { frames };
-    Ok(TakeFile { path: path.to_path_buf(), len: i64::try_from(len).unwrap_or(i64::MAX), resampled, audio: None })
+    Ok(TakeFile { embedded: false, path: path.to_path_buf(), len: i64::try_from(len).unwrap_or(i64::MAX), resampled, audio: None })
 }
 
 /// Place one track's take, from its files in order, as [`add_recording_in`] says. A file that
@@ -210,9 +228,10 @@ fn place_take(
         // (its clips stay within what it holds, should the header have said more)
         let span = Range::new(span.start, span.start.saturating_add(i64::try_from(buf.frames()).unwrap_or(0).min(span.len())));
         let name = file.path.file_stem().and_then(OsStr::to_str).unwrap_or("Take").to_string();
-        let src = add_source(s, &name, buf, Some(&file.path.to_string_lossy()), FileFormat::Wav);
+        let path = file.path.to_string_lossy();
+        let src = add_source(s, &name, buf, (!file.embedded).then_some(path.as_ref()), FileFormat::Wav);
         if let Some(x) = s.sources.last_mut() {
-            x.unsaved = file.resampled;
+            x.unsaved = file.embedded || file.resampled;
         }
         sources.push((src, name, span));
     }
@@ -262,6 +281,29 @@ mod record_tests {
         bytes.extend((0..frames).flat_map(|i| (i as f32 / frames as f32 - 0.5).to_le_bytes()));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn microphone_take_keeps_routed_samples_after_bundle_reopen() {
+        let mut e = Engine::default();
+        let track = armed(&mut e, "Vox", "mono", "In 2");
+        let routes = super::super::input_takes(&e, 2);
+        let rate = e.session().sample_rate.hz();
+        let plan = Recording { start: 240, pass: None, punch: None, rate, takes: Vec::new() };
+        let pcm = AudioBuffer { sample_rate: rate, channels: vec![vec![0.125; 256], vec![-0.375; 256]] };
+        let ids = place_input_recording(&mut e, &plan, routes, &pcm);
+        assert_eq!(ids.len(), 1);
+        let path = "Audio/Input.scraftz";
+        let (_, bytes) = e.prepare_account_bundle(path).unwrap();
+        let mut fresh = Engine::default();
+        assert!(fresh.open_account_bundle(path, &bytes).unwrap().is_empty());
+        let (_, clip) = fresh.session().find_clip(ids[0]).unwrap();
+        assert_eq!((clip.start, clip.length), (plan.start, 256));
+        assert!(fresh.session().track(track).is_some());
+        let source = &fresh.session().sources[0];
+        assert_eq!(fresh.session().pool.get(source.id).unwrap().buffer.channels, vec![pcm.channels[1].clone()]);
+        e.execute("edit.undo", &json!({})).unwrap();
+        assert!(e.session().find_clip(ids[0]).is_none());
     }
 
     #[test]

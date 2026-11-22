@@ -13,8 +13,23 @@ pub type AccountSessionFn = Box<dyn FnMut(AccountSessionRequest) -> Result<(), S
 
 /// Host services injected by the app. File dialogs return paths as picked. The caller converts
 /// them to text where commands need it ([`crate::dialogs::unicode`]).
+pub enum CaptureEvent {
+    Started,
+    Finished(craft_audio::AudioBuffer, String),
+    Failed(String),
+}
+
+/// A host that captures PCM without native input devices or take files.
+pub trait Microphone {
+    fn prepare(&mut self, rate: u32, max_frames: u32);
+    fn poll(&mut self) -> Option<CaptureEvent>;
+    fn stop(&mut self);
+    fn cancel(&mut self);
+}
+
 #[derive(Default)]
 pub struct Services {
+    pub microphone: Option<Box<dyn Microphone>>,
     /// Delegate the account session lifecycle to the WebOS desktop.
     pub account_session: Option<AccountSessionFn>,
     pub pick_open: Option<Box<dyn Fn(&str, &[&str]) -> Option<PathBuf>>>,

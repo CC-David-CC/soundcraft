@@ -170,7 +170,7 @@ impl AccountHost {
     }
 
     fn unfinished(app: &SoundApp) -> bool {
-        app.engine.transport.recording || app.bounce.is_some()
+        app.engine.transport.recording || app.microphone_busy() || app.bounce.is_some()
     }
 
     fn state(&self, app: &SoundApp) -> Value {
