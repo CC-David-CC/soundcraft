@@ -111,7 +111,7 @@ fn add_recording_in(
 
 /// Place microphone PCM using the same punch, loop, playlist, and undo behavior as file-backed takes.
 pub fn place_input_recording(e: &mut Engine, plan: &Recording, routes: Vec<super::InputTake>, input: &AudioBuffer) -> Vec<soundcraft_model::ClipId> {
-    if input.frames() == 0 || input.channels.is_empty() || input.sample_rate != e.session().sample_rate.hz() {
+    if input.channels.is_empty() || input.frames() == 0 || input.sample_rate != e.session().sample_rate.hz() {
         return Vec::new();
     }
     let before = e.session_arc();

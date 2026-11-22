@@ -99,7 +99,12 @@ export class BrowserMicrophone {
             this.source.connect(this.node);
             this.node.connect(context.destination);
             stream.getAudioTracks()[0].addEventListener("ended", () => {
-                if (this.request === request) {
+                if (this.request !== request) return;
+                if (this.phase === "ready") {
+                    this.clear();
+                    this.phase = "failed";
+                    this.message = "Microphone disconnected.";
+                } else if (this.phase === "recording") {
                     this.message = "Microphone disconnected.";
                     this.stop();
                 }
