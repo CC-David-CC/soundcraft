@@ -70,7 +70,11 @@ pub fn start() {
                     let engine =
                         if account.is_some() || search.contains("empty") { Engine::default() } else { soundcraft_engine::demo::demo_engine() };
                     let player = soundcraft_playback::Player::new(Arc::new(engine.session().clone()));
-                    let services = Services { microphone: Some(Box::new(crate::microphone::WebInput::new())), account_session: account.as_ref().map(AccountHost::session_service), ..Services::default() };
+                    let services = Services {
+                        microphone: Some(Box::new(crate::microphone::WebInput::new())),
+                        account_session: account.as_ref().map(AccountHost::session_service),
+                        ..Services::default()
+                    };
                     let app = SoundApp::new(engine, Some(player), services);
                     Ok(Box::new(WebShell { app, inbox: Rc::default(), samples: Rc::default(), account }))
                 }),

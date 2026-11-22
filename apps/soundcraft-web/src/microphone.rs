@@ -56,7 +56,9 @@ impl Microphone for WebInput {
                     if channels.is_empty() {
                         channels.resize_with(chunk.length() as usize, Vec::new);
                     }
-                    if chunk.length() == 0 { continue; }
+                    if chunk.length() == 0 {
+                        continue;
+                    }
                     for (i, channel) in channels.iter_mut().enumerate() {
                         let plane = Float32Array::new(&chunk.get(i as u32 % chunk.length()));
                         let start = channel.len();
@@ -71,13 +73,19 @@ impl Microphone for WebInput {
                 self.device.clear();
                 Some(CaptureEvent::Failed(error))
             }
-            _ => None
+            _ => None,
         }
     }
-    fn stop(&mut self) { self.device.stop(); }
-    fn cancel(&mut self) { self.device.clear(); }
+    fn stop(&mut self) {
+        self.device.stop();
+    }
+    fn cancel(&mut self) {
+        self.device.clear();
+    }
 }
 
 impl Drop for WebInput {
-    fn drop(&mut self) { self.device.clear(); }
+    fn drop(&mut self) {
+        self.device.clear();
+    }
 }

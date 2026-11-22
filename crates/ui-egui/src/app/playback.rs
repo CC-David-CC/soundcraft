@@ -56,7 +56,9 @@ impl SoundApp {
             p.stop();
         }
         if self.microphone_busy() && !self.engine.transport.recording && self.microphone_placement.is_none() {
-            if let Some(mic) = &mut self.services.microphone { mic.cancel(); }
+            if let Some(mic) = &mut self.services.microphone {
+                mic.cancel();
+            }
             self.microphone_routes = None;
         }
         if self.engine.transport.recording {
@@ -95,7 +97,9 @@ impl SoundApp {
         self.edit_layout.follow_hold = false;
     }
 
-    pub fn microphone_busy(&self) -> bool { self.microphone_routes.is_some() }
+    pub fn microphone_busy(&self) -> bool {
+        self.microphone_routes.is_some()
+    }
     pub(super) fn poll_microphone(&mut self) {
         let Some(event) = self.services.microphone.as_mut().and_then(|mic| mic.poll()) else { return };
         match event {
@@ -103,9 +107,11 @@ impl SoundApp {
             crate::CaptureEvent::Failed(error) => {
                 self.microphone_routes = None;
                 self.ui.status = crate::localized_format!("Cannot record: {err}", err = error);
-            },
+            }
             crate::CaptureEvent::Finished(buffer, warning) => {
-                if self.engine.transport.recording { self.stop_play(); }
+                if self.engine.transport.recording {
+                    self.stop_play();
+                }
                 let routes = self.microphone_routes.take().unwrap_or_default();
                 if let Some(plan) = self.microphone_placement.take() {
                     let ids = soundcraft_engine::io::place_input_recording(&mut self.engine, &plan, routes, &buffer);
@@ -115,13 +121,17 @@ impl SoundApp {
                         crate::localized_format!("Recorded {} clip(s)", ids.len())
                     };
                 }
-                if !warning.is_empty() { self.ui.status.push_str(&format!(" ({warning})")); }
+                if !warning.is_empty() {
+                    self.ui.status.push_str(&format!(" ({warning})"));
+                }
             }
         }
     }
 
     fn start_recording(&mut self) {
-        if self.microphone_busy() { return; }
+        if self.microphone_busy() {
+            return;
+        }
         let armed = self.engine.session().tracks.iter().any(|t| t.mixer.record_arm);
         if !armed {
             let why = if self.engine.session().tracks.is_empty() {
@@ -311,7 +321,9 @@ impl SoundApp {
         });
         if self.microphone_busy() {
             self.microphone_placement = Some(plan.clone());
-            if let Some(mic) = &mut self.services.microphone { mic.stop(); }
+            if let Some(mic) = &mut self.services.microphone {
+                mic.stop();
+            }
         }
         self.punch = None;
         self.autosaved_rev = 0;
@@ -475,7 +487,9 @@ impl SoundApp {
                     // The old capture belongs to the replaced document, never to the new one.
                     self.recorder = None;
                     self.recorder_failed = false;
-                    if let Some(mic) = &mut self.services.microphone { mic.cancel(); }
+                    if let Some(mic) = &mut self.services.microphone {
+                        mic.cancel();
+                    }
                     self.microphone_routes = None;
                     self.microphone_placement = None;
                     self.punch = None;

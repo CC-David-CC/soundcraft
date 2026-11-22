@@ -352,6 +352,9 @@ RISC-V (riscv64): `soundcraft-<ver>-linux-riscv64.tar.gz`, a tarball only (glibc
 
 ### Web (WebAssembly)
 
+To record, create an audio track, arm it, then press **Record** and allow microphone access. **Stop** releases the microphone and places the recorded audio on the armed tracks. Save the session bundle to keep its audio with the project. Microphone recording requires HTTPS or localhost.
+
+
 | Build | File | Notes |
 |---|---|---|
 | Static site | `soundcraft-web-<ver>.zip` | Runs in a modern browser; host it on any static server |

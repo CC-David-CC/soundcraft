@@ -92,7 +92,9 @@ export class BrowserMicrophone {
                 if (data.chunk) this.chunks.push(data.chunk);
                 else this.complete(data.warning);
             };
-            this.node.onprocessorerror = () => this.complete("Audio capture stopped unexpectedly.");
+            this.node.onprocessorerror = () => {
+                if (this.request === request) this.complete("Audio capture stopped unexpectedly.");
+            };
             this.source = context.createMediaStreamSource(stream);
             this.source.connect(this.node);
             this.node.connect(context.destination);

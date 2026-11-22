@@ -1102,8 +1102,10 @@ fn read_bundle(bytes: &[u8], limits: BundleLimits) -> Result<(String, std::colle
 pub fn plan_takes(e: &Engine, unsaved_dir: &Path, input_channels: usize) -> Vec<(TrackId, Vec<usize>, PathBuf)> {
     let dir = e.path.as_deref().and_then(|p| Path::new(p).parent()).unwrap_or(unsaved_dir);
     let take_no = e.session().sources.len() + 1;
-    input_takes(e, input_channels).into_iter().map(|route| {
-let file = |n: usize| dir.join("Audio Files").join(format!("{}_{n:02}.wav", sanitize_name(&route.name)));
+    input_takes(e, input_channels)
+        .into_iter()
+        .map(|route| {
+            let file = |n: usize| dir.join("Audio Files").join(format!("{}_{n:02}.wav", sanitize_name(&route.name)));
             let path = (take_no..take_no + 1_000).map(file).find(|p| !p.exists()).unwrap_or_else(|| file(take_no));
             (route.track, route.inputs, path)
         })
@@ -1131,8 +1133,8 @@ pub fn input_takes(e: &Engine, input_channels: usize) -> Vec<InputTake> {
             };
             let inputs = (0..t.channels()).map(|k| first.saturating_add(k) % input_channels.max(1)).collect();
             InputTake { track: t.id, inputs, name: t.name.clone() }
-        }).collect()
-
+        })
+        .collect()
 }
 
 /// Checks that `path` is a file directly inside the media folder `media_dir` once both are

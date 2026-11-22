@@ -13,7 +13,7 @@ impl SoundApp {
     /// recreated with the new player. Refused while recording, which would lose the take; `ui.audio`
     /// then stays the configuration of the open device.
     pub fn apply_audio_config(&mut self, cfg: soundcraft_playback::AudioConfig) -> Result<(), String> {
-        if self.engine.transport.recording {
+        if self.engine.transport.recording || self.microphone_busy() {
             return Err(crate::localization::text("stop recording before changing the audio device").into());
         }
         self.ui.audio = cfg;

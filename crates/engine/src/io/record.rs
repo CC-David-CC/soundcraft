@@ -119,10 +119,18 @@ pub fn place_input_recording(e: &mut Engine, plan: &Recording, routes: Vec<super
     for route in routes {
         let channels = route.inputs.iter().map(|i| input.channels[i % input.channels.len()].clone()).collect();
         let path = PathBuf::from(format!("{}_{}.wav", super::sanitize_name(&route.name), e.session().sources.len() + 1));
-        let file = TakeFile { embedded: true, path, len: input.frames() as i64, resampled: false, audio: Some(AudioBuffer { channels, sample_rate: input.sample_rate }) };
+        let file = TakeFile {
+            embedded: true,
+            path,
+            len: input.frames() as i64,
+            resampled: false,
+            audio: Some(AudioBuffer { channels, sample_rate: input.sample_rate }),
+        };
         clips.extend(place_take(e.session_mut(), route.track, vec![file], plan.start, plan.pass, plan.punch).0);
     }
-    if !clips.is_empty() { e.push_undo("Record", before); }
+    if !clips.is_empty() {
+        e.push_undo("Record", before);
+    }
     clips
 }
 

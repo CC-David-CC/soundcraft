@@ -11,8 +11,7 @@ pub enum AccountSessionRequest {
 
 pub type AccountSessionFn = Box<dyn FnMut(AccountSessionRequest) -> Result<(), String>>;
 
-/// Host services injected by the app. File dialogs return paths as picked. The caller converts
-/// them to text where commands need it ([`crate::dialogs::unicode`]).
+/// Transitions reported by an asynchronous microphone input.
 pub enum CaptureEvent {
     Started,
     Finished(craft_audio::AudioBuffer, String),
@@ -27,6 +26,8 @@ pub trait Microphone {
     fn cancel(&mut self);
 }
 
+/// Host services injected by the app. File dialogs return paths as picked. The caller converts
+/// them to text where commands need it ([`crate::dialogs::unicode`]).
 #[derive(Default)]
 pub struct Services {
     pub microphone: Option<Box<dyn Microphone>>,
