@@ -144,7 +144,16 @@ impl NewTracks {
     pub(crate) fn show(&mut self, ui: &mut Ui, enter: bool) -> Option<Value> {
         let shortcut_row_action = self.keys(ui.ctx());
         let widths = RowWidths::new(ui);
-        ui.set_min_width(widths.total(ui));
+        let full_width = widths.total(ui);
+        let width = full_width.min(available_width(ui.ctx()));
+        let compact = width < full_width;
+        let name_label = crate::localization::text("Name:");
+        let name_width = if compact {
+            NAME_WIDTH.min((width - text_width(ui, name_label) - ui.spacing().item_spacing.x - 2.0 * ui.spacing().button_padding.x).max(1.0))
+        } else {
+            NAME_WIDTH
+        };
+        ui.set_min_width(width);
         // The old row must not consume text on the first frame after adding a new one.
         if self.focus_count && ui.is_enabled() && !ui.is_sizing_pass() {
             ui.memory_mut(|m| {
@@ -161,7 +170,8 @@ impl NewTracks {
                 // Explicit row IDs keep editing state with the row when rows above it are removed.
                 let id = egui::Id::unique(("new_tracks_row", row.key));
                 let rect = egui::Rect::from_min_size(ui.available_rect_before_wrap().min, vec2(ui.available_width(), ui.spacing().interact_size.y));
-                ui.scope_builder(egui::UiBuilder::new().scope_id(id).max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
+                let layout = egui::Layout::left_to_right(egui::Align::Center).with_main_wrap(compact);
+                ui.scope_builder(egui::UiBuilder::new().scope_id(id).max_rect(rect).layout(layout), |ui| {
                     let label = ui.label(crate::localization::text("Create"));
                     let counter = ui
                         .scope_builder(egui::UiBuilder::new().scope_id(id.with("count")), |ui| {
@@ -228,10 +238,13 @@ impl NewTracks {
                         ui.allocate_space(vec2(widths.timebase, ui.spacing().interact_size.y));
                         None
                     };
-                    let label = ui.label(crate::localization::text("Name:"));
+                    if compact {
+                        ui.end_row();
+                    }
+                    let label = ui.label(name_label);
                     let name = crate::widgets::named_text_field(
-                        ui.add(egui::TextEdit::singleline(&mut row.name).id(id.with("name")).desired_width(NAME_WIDTH)).labelled_by(label.id),
-                        crate::localization::text("Name:"),
+                        ui.add(egui::TextEdit::singleline(&mut row.name).id(id.with("name")).desired_width(name_width)).labelled_by(label.id),
+                        name_label,
                     );
                     if format.iter().chain(timebase.iter()).chain([&kind, &name]).any(|r| r.clicked() || r.has_focus()) {
                         self.active = index;
@@ -275,6 +288,11 @@ impl NewTracks {
             None
         }
     }
+}
+
+/// Leave room for the window frame and for the scrollbar beside creation rows.
+pub(super) fn available_width(ctx: &egui::Context) -> f32 {
+    (ctx.content_rect().width() - 32.0).max(1.0)
 }
 
 /// Measure all choices with the current UI font, rather than the selected label.
@@ -358,9 +376,13 @@ mod tests {
 
     /// Opens a settled New Tracks dialog in a macOS UI harness.
     fn harness() -> Harness<'static, SoundApp> {
+        harness_at(vec2(1600.0, 1000.0))
+    }
+
+    fn harness_at(size: egui::Vec2) -> Harness<'static, SoundApp> {
         let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
         assert!(app.dialogs.open_for_command(&app.engine, "track.new"));
-        let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
+        let mut h = Harness::builder().with_size(size).build_ui_state(
             |ui, app: &mut SoundApp| {
                 app.logic(ui.ctx());
                 app.ui(ui);
@@ -389,6 +411,25 @@ mod tests {
         h.key_press_modifiers(m, key);
         // A centered window needs another frame to settle after its row count changes.
         h.run_steps(4);
+    }
+
+    #[test]
+    fn compact_dialog_keeps_track_fields_and_create_reachable() {
+        let mut h = harness_at(vec2(336.0, 776.0));
+        let viewport = h.ctx.content_rect();
+        for rect in [
+            h.get_by_value("Mono").rect(),
+            h.get_by_value("Audio Track").rect(),
+            h.get_by_value("Samples").rect(),
+            h.get_by_role_and_label(Role::TextInput, "Name:").rect(),
+            h.get_by_role_and_label(Role::Button, "Create").rect(),
+        ] {
+            assert!(rect.is_positive() && viewport.contains_rect(rect), "{rect:?} outside {viewport:?}");
+        }
+        h.get_by_role_and_label(Role::Button, "Create").click();
+        h.run_steps(4);
+        assert!(h.state().dialogs.open.is_none());
+        assert_eq!(h.state().engine.session().tracks.len(), 1);
     }
 
     /// Every selectable label retains its column's maximum measured width.

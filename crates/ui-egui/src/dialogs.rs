@@ -514,7 +514,12 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
         |i: &egui::InputState| i.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Enter, pressed: true, repeat: false, .. }));
     let enter = !first_frame && ctx.input(fresh_enter) && (ctx.memory(|m| m.focused().is_none()) || ctx.text_edit_focused());
     let esc = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-    egui::Window::new(egui::RichText::new(crate::localization::text(&title)).font(bold(13.0)))
+    let mut window = egui::Window::new(egui::RichText::new(crate::localization::text(&title)).font(bold(13.0)));
+    if matches!(d, Dialog::NewTracks(_)) {
+        let width = new_tracks::available_width(ctx);
+        window = window.default_width(340.0_f32.min(width)).max_width(width);
+    }
+    window
         .id(egui::Id::unique(&title))
         .collapsible(false)
         .resizable(false)
